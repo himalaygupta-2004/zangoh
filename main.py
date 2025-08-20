@@ -96,8 +96,6 @@ async def process_customer_query(query: CustomerQuery):
 
 
 # Mock API endpoints for testing
-# These endpoints are already complete and do not need modification.
-# They are used by the agents to simulate external service calls.
 @app.get("/api/orders/{order_id}")
 async def get_order(order_id: str):
     """Mock Order API endpoint"""
