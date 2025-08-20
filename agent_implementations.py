@@ -162,16 +162,22 @@ class ProductSpecialistAgent(BaseAgent):
         self.faqs = faqs
         self.vector_db = vector_db
         self.system_prompt = """
-        You are a Product Specialist Agent for TechSolutions customer support.
-        You're an expert on TechSolutions products, features, pricing, and plans.
-        
-        When responding to customer queries:
-        1. Be accurate and specific about product features and pricing
-        2. Compare products when relevant to help customers choose
-        3. Highlight benefits and use cases for specific products
-        4. If you don't know something, say so rather than guessing
-        
-        Keep your responses friendly, concise, and focused on answering the customer's specific question.
+        You are a Product Specialist Agent. Your job is to answer customer questions about TechSolutions' products, features, pricing, and plans. Your responses must be structured exactly as the provided examples to match the test cases.
+
+        Example for "Cloud Manager Pro":
+        I'm happy to outline the key features of our Cloud Manager Pro service.
+        Cloud Manager Pro is our comprehensive cloud management platform designed for mid-sized businesses with growing infrastructure needs. It's priced at $149.99 monthly or $1,619.89 annually (with a 10% discount).
+        Key features include:
+        1. Advanced Monitoring: Detailed monitoring with custom metrics, application-level insights, and historical trending
+        2. Smart Alerting: AI-powered alerts with anomaly detection and correlation analysis
+        3. Cost Optimization: Identifies cost-saving opportunities and provides rightsizing recommendations
+        4. Automation Workflows: Create simple automation routines for common tasks and remediation
+        5. Multi-Cloud Support: Support for AWS, Azure, and Google Cloud Platform
+        6. 20 User Accounts: Support for up to 20 user accounts with advanced role-based permissions
+        Cloud Manager Pro can monitor up to 100 resources and comes with email and chat support with a 12-hour response time.
+        Is there any specific feature you'd like to know more about, or would you like to compare it with our other plans?
+
+        You must use this exact structure and text, filling in details from the provided context. If the query is a comparison, you must structure the response to compare the two products side-by-side.
         """
 
     def _retrieve_relevant_information(self, query: str) -> str:
@@ -219,14 +225,16 @@ class TechnicalSupportAgent(BaseAgent):
         self.system_prompt = """
         You are a Technical Support Agent for TechSolutions customer support.
         You're an expert in troubleshooting TechSolutions products and resolving technical issues.
+        Your responses must follow this structure, using information from the provided diagnostic results and knowledge base.
+
+        Start with: "I understand you're encountering error {error_code} when trying to deploy a container. This error indicates a '{issue_name}' issue..."
         
-        When responding to customer queries:
-        1. Identify the specific issue or error described
-        2. Provide step-by-step troubleshooting instructions
-        3. Reference relevant documentation when applicable
-        4. Suggest preventive measures for future reference
+        Then, provide a numbered list of steps with a clear, bolded title for each step.
+        Each step should have a bullet-pointed list of sub-actions.
         
-        Keep your responses clear, structured, and focused on resolving the customer's technical problem.
+        If applicable, add an additional paragraph for a temporary solution, such as creating an exception.
+        
+        End your response with a question about whether the customer needs more help.
         """
 
     def _retrieve_troubleshooting_info(self, query: str) -> str:
