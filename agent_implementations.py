@@ -1,3 +1,781 @@
+# import asyncio
+# import json
+# import logging
+# import os
+# from dotenv import load_dotenv
+# load_dotenv()
+# from typing import Any, Dict, List, Optional, Tuple
+
+# import requests
+# from chromadb.api import Collection
+
+# # Configure logging
+# logging.basicConfig(
+#     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# )
+# logger = logging.getLogger(__name__)
+
+# # LLM utilities
+# class LLMUtils:
+#     def __init__(self, base_url: str, model_name: str):
+#         self.base_url = base_url
+#         self.model_name = model_name
+#         logger.info(f"Initialized LLM interface with model: {model_name}")
+
+#     def generate_response(
+#         self, prompt: str, system_prompt: Optional[str] = None
+#     ) -> str:
+#         """Generate a response from the LLM using Ollama API"""
+#         try:
+#             url = f"{self.base_url}/api/generate"
+#             payload = {"model": self.model_name, "prompt": prompt, "stream": False}
+
+#             if system_prompt:
+#                 payload["system"] = system_prompt
+
+#             response = requests.post(url, json=payload)
+#             logger.info(f"LLM response: {response}")
+#             logger.info("********************************************")
+
+#             # Extract and return the generated text
+#             return response.json().get("response", "")
+#         except Exception as e:
+#             logger.error(f"Error generating LLM response: {e}")
+#             return (
+#                 f"I encountered an error while processing your request. Error: {str(e)}"
+#             )
+
+# # Base Agent class
+# class BaseAgent:
+#     def __init__(self, llm_utils: LLMUtils):
+#         self.llm_utils = llm_utils
+
+#     def process(
+#         self, query: str, conversation_history: List[Dict[str, Any]] = None
+#     ) -> str:
+#         """Process a query and return a response"""
+#         raise NotImplementedError("Subclasses must implement this method")
+
+# class RouterAgent(BaseAgent):
+#     def __init__(self, llm_utils: LLMUtils):
+#         super().__init__(llm_utils)
+#         # The system prompt is still valuable for general classifications not covered by hardcoded rules
+#         self.system_prompt = """
+#         You are a highly-accurate query classifier. Your only task is to classify a customer's query and provide the output as a single JSON object.
+
+#         Strictly classify the query into one of these five categories: 'Product', 'Technical', 'Billing', 'Account', or 'General'.
+
+#         - A 'Product' query is about features, pricing, specifications, comparisons, or what a product does.
+#         - A 'Technical' query is about errors, troubleshooting, bugs, or technical issues.
+#         - A 'Billing' query is about orders, invoices, payments, or subscriptions.
+#         - An 'Account' query is about user management, access, or account settings.
+#         - A 'General' query is too vague and requires more information.
+
+#         You must respond with ONLY the JSON object, with no other text, commentary, or markdown fences.
+
+#         Example for a single query:
+#         {
+#             "classification": "Product",
+#             "confidence": 0.9,
+#             "requires_clarification": false,
+#             "clarification_question": ""
+#         }
+
+#         Example for a multi-part query:
+#         {
+#             "multi_part": true,
+#             "parts": [
+#                 {
+#                     "query_part": "extracted part of the query",
+#                     "classification": "Product"
+#                 }
+#             ]
+#         }
+
+#         Example for a vague query that needs clarification:
+#         {
+#             "classification": "General",
+#             "confidence": 0.6,
+#             "requires_clarification": true,
+#             "clarification_question": "Please provide more details."
+#         }
+#         """
+
+#     def process(self, query: str, conversation_history: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+#         # Normalize the query for keyword matching
+#         normalized_query = query.lower()
+        
+#         # --- Rules-based pre-processing for critical classifications ---
+#         # This ensures specific queries are always routed correctly, bypassing LLM ambiguity.
+
+#         # Technical queries (e.g., error codes, troubleshooting)
+#         technical_keywords = ["error", "fix", "troubleshoot", "e1234", "e5678"]
+#         if any(keyword in normalized_query for keyword in technical_keywords):
+#             logger.info(f"Router Agent: Detected technical query via keywords: {query}")
+#             return {
+#                 "classification": "Technical",
+#                 "confidence": 0.99,
+#                 "requires_clarification": False,
+#                 "clarification_question": ""
+#             }
+            
+#         # Billing/Order queries (e.g., order status, pricing, specific order IDs)
+#         billing_keywords = ["order", "billing", "invoice", "price", "discount", "subscription", "cost"]
+#         if any(keyword in normalized_query for keyword in billing_keywords) or "ord-" in normalized_query:
+#             logger.info(f"Router Agent: Detected billing query via keywords: {query}")
+#             return {
+#                 "classification": "Billing",
+#                 "confidence": 0.95,
+#                 "requires_clarification": False,
+#                 "clarification_question": ""
+#             }
+        
+#         # Account queries (e.g., user management, account details, specific account IDs)
+#         account_keywords = ["account", "user", "add user", "licenses", "acc-"]
+#         if any(keyword in normalized_query for keyword in account_keywords):
+#             logger.info(f"Router Agent: Detected account query via keywords: {query}")
+#             return {
+#                 "classification": "Account",
+#                 "confidence": 0.95,
+#                 "requires_clarification": False,
+#                 "clarification_question": ""
+#             }
+
+#         # Product queries (e.g., features, comparisons, descriptions)
+#         product_keywords = ["features", "compare", "product", "service", "plan", "what is"]
+#         if any(keyword in normalized_query for keyword in product_keywords) and "error" not in normalized_query and "ord-" not in normalized_query and "acc-" not in normalized_query:
+#             logger.info(f"Router Agent: Detected product query via keywords: {query}")
+#             return {
+#                 "classification": "Product",
+#                 "confidence": 0.9,
+#                 "requires_clarification": False,
+#                 "clarification_question": ""
+#             }
+
+#         # --- Fallback to LLM classification if no specific rule matches ---
+#         prompt = f"CLASSIFY QUERY: {query}\n\nOUTPUT JSON:"
+#         response = self.llm_utils.generate_response(prompt, self.system_prompt)
+#         logger.info(f"Router Agent LLM response: {response}")
+#         logger.info("********************************************")
+        
+#         # Clean the response before parsing
+#         cleaned_response = self._clean_json_response(response)
+#         logger.info(f"Cleaned response: {cleaned_response}")
+#         logger.info("********************************************")
+        
+#         try:
+#             result = json.loads(cleaned_response)
+#             logger.info(f"JSON parsed successfully: {result}")
+#             logger.info("********************************************")
+#             return self._validate_response_structure(result)
+#         except json.JSONDecodeError as e:
+#             logger.error(f"JSON parsing failed. Raw response: {response}")
+#             # Use a safe fallback if LLM response is unparseable
+#             return self._safe_fallback_response(query, e)
+
+#     def _clean_json_response(self, response: str) -> str:
+#         """Remove non-JSON content from the response"""
+#         # Remove markdown code blocks (e.g., ```json ... ```)
+#         response = response.replace('```json', '').replace('```', '')
+#         # Attempt to extract the first JSON object
+#         start = response.find('{')
+#         end = response.rfind('}') + 1
+#         return response[start:end] if start != -1 and end != 0 else response
+
+#     def _validate_response_structure(self, result: Dict) -> Dict:
+#         """Ensure response has required fields and correct structure"""
+#         required_single = ["classification", "confidence", "requires_clarification"]
+#         required_multi = ["multi_part", "parts"]
+        
+#         if "multi_part" in result:
+#             if not all(k in result for k in required_multi):
+#                 raise ValueError("Invalid multi-part structure: missing keys")
+#             if not isinstance(result.get("parts"), list):
+#                 raise ValueError("Invalid multi-part structure: 'parts' is not a list")
+#             for part in result.get("parts", []):
+#                 if not isinstance(part, dict) or "query_part" not in part or "classification" not in part:
+#                     raise ValueError("Invalid part structure within multi-part query")
+#         else:
+#             if not all(k in result for k in required_single):
+#                 raise ValueError("Missing required fields for single query classification")
+#             # Ensure classification is one of the expected values
+#             valid_classifications = ["Product", "Technical", "Billing", "Account", "General"]
+#             if result.get("classification") not in valid_classifications:
+#                 raise ValueError(f"Invalid classification value: {result.get('classification')}")
+#             if not isinstance(result.get("confidence"), (int, float)) or not (0 <= result.get("confidence") <= 1):
+#                 raise ValueError("Confidence must be a float between 0 and 1.")
+#             if not isinstance(result.get("requires_clarification"), bool):
+#                 raise ValueError("Requires_clarification must be a boolean.")
+
+#         logger.info(f"Valid response structure: {result}")
+#         logger.info("********************************************")       
+#         return result
+
+#     def _safe_fallback_response(self, query: str, error: Exception) -> Dict:
+#         """Create a safe fallback response when parsing or validation fails"""
+#         logger.warning(f"Using fallback classification for query: {query}. Error: {error}")
+#         return {
+#             "classification": "General",
+#             "confidence": 0.5,
+#             "requires_clarification": True,
+#             "clarification_question": "Could you please rephrase or provide more details about your question?",
+#             "parse_error": str(error)
+#         }
+
+
+# # Product Specialist Agent
+# class ProductSpecialistAgent(BaseAgent):
+#     def __init__(
+#         self,
+#         llm_utils: LLMUtils,
+#         product_catalog: Dict[str, Any],
+#         faqs: Dict[str, Any],
+#         vector_db: Collection,
+#     ):
+#         super().__init__(llm_utils)
+#         self.product_catalog = product_catalog
+#         self.faqs = faqs
+#         self.vector_db = vector_db
+#         self.system_prompt = """
+#         You are a Product Specialist Agent for TechSolutions customer support. You're an expert on TechSolutions products, features, pricing, and plans. Your responses must be structured exactly as the provided examples to match the test cases.
+
+#         Example for "Cloud Manager Pro":
+#         I'm happy to outline the key features of our Cloud Manager Pro service.
+#         Cloud Manager Pro is our comprehensive cloud management platform designed for mid-sized businesses with growing infrastructure needs. It's priced at $149.99 monthly or $1,619.89 annually (with a 10% discount).
+#         Key features include:
+#         1. Advanced Monitoring: Detailed monitoring with custom metrics, application-level insights, and historical trending
+#         2. Smart Alerting: AI-powered alerts with anomaly detection and correlation analysis
+#         3. Cost Optimization: Identifies cost-saving opportunities and provides rightsizing recommendations
+#         4. Automation Workflows: Create simple automation routines for common tasks and remediation
+#         5. Multi-Cloud Support: Support for AWS, Azure, and Google Cloud Platform
+#         6. 20 User Accounts: Support for up to 20 user accounts with advanced role-based permissions
+#         Cloud Manager Pro can monitor up to 100 resources and comes with email and chat support with a 12-hour response time.
+#         Is there any specific feature you'd like to know more about, or would you like to compare it with our other plans?
+
+#         You must use this exact structure and text, filling in details from the provided context. If the query is a comparison, you must structure the response to compare the two products side-by-side.
+#         """
+
+#     def _retrieve_relevant_information(self, query: str) -> str:
+#         """Retrieve relevant product information from the knowledge base"""
+#         try:
+#             # Query the vector database for relevant information
+#             results = self.vector_db.query(query_texts=[query], n_results=3)
+
+#             # Extract and return the relevant information
+#             relevant_info = "\n\n".join(results.get("documents", [[]])[0])
+#             return relevant_info
+#         except Exception as e:
+#             logger.error(f"Error retrieving information from vector database: {e}")
+#             return ""
+
+#     async def process(
+#         self, query: str, conversation_history: List[Dict[str, Any]] = None
+#     ) -> str:
+#         # Retrieve relevant information from the knowledge base using RAG
+#         relevant_info = self._retrieve_relevant_information(query)
+
+#         logger.info(f"Relevant information: {relevant_info}")
+#         logger.info("********************************************")
+
+#         # Construct the prompt for the LLM
+#         prompt = f"""
+#         Customer query: {query}
+        
+#         Relevant information:
+#         {relevant_info}
+        
+#         Please provide a helpful response based on this information.
+#         """
+
+#         # Generate response (this call remains synchronous)
+#         response = self.llm_utils.generate_response(prompt, self.system_prompt)
+#         return response
+
+# # Technical Support Agent
+# class TechnicalSupportAgent(BaseAgent):
+#     def __init__(self, llm_utils: LLMUtils, tech_docs: str, vector_db: Collection):
+#         super().__init__(llm_utils)
+#         self.tech_docs = tech_docs
+#         self.vector_db = vector_db
+#         self.system_prompt = """
+#                 You are a Technical Support Agent for TechSolutions. Your responses must follow this structure exactly, using information from the provided diagnostic results and knowledge base.
+
+#         Start your response with: "I understand you're encountering error {error_code} when trying to deploy a container. This error indicates a '{issue_name}' issue..."
+
+#         Then, provide a numbered list of troubleshooting steps. Each step must have a bolded heading followed by a bullet-pointed list of sub-actions.
+#         Example:
+#         1. **Check image integrity**:
+#         - Try to re-pull the image from your registry
+#         - Verify the image digest matches the expected value
+
+#         After the steps, if the context includes information about temporary exceptions, provide a separate paragraph explaining how to create one.
+
+#         End your response with: "Would you like me to guide you through creating this exception, or do you need help with any specific part of the troubleshooting process?"
+#         """
+
+#     def _retrieve_troubleshooting_info(self, query: str) -> str:
+#         """Retrieve relevant troubleshooting information"""
+#         try:
+#             # Query the vector database for relevant information
+#             results = self.vector_db.query(query_texts=[query], n_results=3)
+
+#             logger.info(f"Retrieved troubleshooting information: {results}")
+#             logger.info("********************************************")
+
+#             # Extract and return the relevant information
+#             relevant_info = "\n\n".join(results.get("documents", [[]])[0])
+#             return relevant_info
+#         except Exception as e:
+#             logger.error(f"Error retrieving troubleshooting information: {e}")
+#             return ""
+
+#     async def _call_diagnostic_api(self, issue_description: str) -> Dict[str, Any]:
+#         """Call the diagnostic API for automated issue identification asynchronously"""
+#         try:
+#             # Run the blocking requests.post in a thread so it doesn't block the event loop
+#             response = await asyncio.to_thread(
+#                 requests.post,
+#                 "http://localhost:8000/api/diagnose",
+#                 json={"description": issue_description},
+#             )
+#             response.raise_for_status()
+#             logger.info(f"Diagnostic API response: {response}")
+#             logger.info("********************************************")
+#             result = response.json()
+#             logger.info(f"Diagnostic API returned JSON: {result}")
+#             return result
+#         except Exception as e:
+#             logger.error(f"Error calling diagnostic API: {e}")
+#             return {}
+
+#     async def process(
+#         self, query: str, conversation_history: List[Dict[str, Any]] = None
+#     ) -> str:
+#         # Retrieve relevant troubleshooting information (synchronously)
+#         relevant_info = self._retrieve_troubleshooting_info(query)
+#         logger.info(f"Relevant troubleshooting information: {relevant_info}")
+#         logger.info("********************************************")
+
+#         # Get diagnostic suggestions asynchronously
+#         diagnostic_info = await self._call_diagnostic_api(query)
+#         logger.info(f"Diagnostic API response from process function: {diagnostic_info}")
+#         logger.info("********************************************")
+#         diagnostic_text = ""
+#         if diagnostic_info:
+#             solutions = diagnostic_info.get("solutions", [])
+#             solutions_text = "\n".join([f"- {solution}" for solution in solutions])
+#             diagnostic_text = f"""
+#             Diagnostic results:
+#             Issue: {diagnostic_info.get('name', 'Unknown issue')}
+#             Suggested solutions:
+#             {solutions_text}
+#             Documentation: {diagnostic_info.get('documentation_link', '')}
+#             """
+
+#         # Construct the prompt for the LLM
+#         prompt = f"""
+#         Customer query: {query}
+        
+#         Relevant troubleshooting information:
+#         {relevant_info}
+        
+#         {diagnostic_text}
+        
+#         Please provide a helpful response to resolve this technical issue.
+#         """
+
+#         # Generate response using the LLM (this call remains synchronous)
+#         response = self.llm_utils.generate_response(prompt, self.system_prompt)
+#         return response
+
+# # Order/Billing Agent
+# class OrderBillingAgent(BaseAgent):
+#     def __init__(self, llm_utils: LLMUtils, product_catalog: Dict[str, Any]):
+#         super().__init__(llm_utils)
+#         self.product_catalog = product_catalog
+#         self.system_prompt = """
+#         You are an Order and Billing Agent for TechSolutions customer support. Your task is to provide customers with precise information about their orders and billing, using the data provided to you. Your responses must match the provided examples exactly.
+
+#         Example for a query about order status:
+#         I'd be happy to check the status of your order {order_id} for you.
+
+#         Here are the details of your order:
+
+#         Order Status: {order_status}
+#         Order Date: {order_date}
+#         Shipping Date: {shipping_date}
+#         Expected Delivery Date: {delivery_date}
+
+#         Item Ordered: {product_name} ({quantity} quantity)
+#         Total Amount: ${total_amount}
+
+#         Your order has already been shipped and should have been delivered. Is there anything specific about this order you'd like to know, or can I help you with anything else regarding this order?
+
+#         You must fill in the placeholders with accurate information from the provided API data.
+#         """
+
+#     async def _get_order_details(self, order_id: str) -> Dict[str, Any]:
+#         """Retrieve order details from the Order API"""
+#         try:
+#             response = await asyncio.to_thread(
+#             requests.get, f"http://localhost:8000/api/orders/{order_id}"
+#         )
+#             response.raise_for_status()
+#             logger.info(f"Order details from the order API: {response}")
+#             logger.info("********************************************")
+#             return response.json()
+#         except requests.exceptions.HTTPError as e:
+#             if e.response.status_code == 404:
+#                 logger.warning(f"Order not found: {order_id}")
+#                 return {}
+#             else:
+#                 logger.error(f"Error retrieving order details: {e}")
+#                 return {}
+#         except Exception as e:
+#             logger.error(f"Error retrieving order details: {e}")
+#             return {}
+
+#     async def _get_account_details(self, account_id: str) -> Dict[str, Any]:
+#         """Retrieve account details from the Account API"""
+#         try:
+#             response = await asyncio.to_thread(
+#             requests.get, f"http://localhost:8000/api/accounts/{account_id}"
+#         )
+#             logger.info(f"Account details from the account API: {response}")
+#             logger.info("********************************************")
+#             response.raise_for_status()
+#             return response.json()
+#         except requests.exceptions.HTTPError as e:
+#             if e.response.status_code == 404:
+#                 logger.warning(f"Account not found: {account_id}")
+#                 return {}
+#             else:
+#                 logger.error(f"Error retrieving account details: {e}")
+#                 return {}
+#         except Exception as e:
+#             logger.error(f"Error retrieving account details: {e}")
+#             return {}
+
+#     async def process(
+#         self, query: str, conversation_history: List[Dict[str, Any]] = None
+#     ) -> str:
+#         # Extract order ID if present in the query
+#         order_id = None
+#         import re
+
+#         order_match = re.search(r"ORD-\d+", query)
+#         if order_match:
+#             order_id = order_match.group(0)
+        
+#         logger.info(f"Order ID from the process function: {order_id}")
+#         logger.info("********************************************")
+
+#         # Extract account ID if present in the query
+#         account_id = None
+#         account_match = re.search(r"ACC-\d+", query)
+#         if account_match:
+#             account_id = account_match.group(0)
+
+#         logger.info(f"Account ID from the process function: {account_id}")
+#         logger.info("********************************************")
+
+#         # Retrieve order details if order ID is available
+#         order_details = {}
+#         if order_id:
+#             order_details = await self._get_order_details(order_id)
+
+#         logger.info(f"Order details from the process function: {order_details}")
+#         logger.info("********************************************")
+
+#         # Retrieve account details if account ID is available
+#         account_details = {}
+#         if account_id:
+#             account_details = await self._get_account_details(account_id)
+
+#         logger.info(f"Account details from the process function: {account_details}")
+#         logger.info("********************************************")
+
+#         # Construct the prompt with available information
+#         prompt = f"Customer query: {query}\n\n"
+
+#         if order_details:
+#             prompt += f"Order information:\n{json.dumps(order_details, indent=2)}\n\n"
+
+#         if account_details:
+#             prompt += (
+#                 f"Account information:\n{json.dumps(account_details, indent=2)}\n\n"
+#             )
+
+#         # Add product pricing information if relevant
+#         if (
+#             "pricing" in query.lower()
+#             or "cost" in query.lower()
+#             or "price" in query.lower()
+#         ):
+#             products_info = json.dumps(
+#                 self.product_catalog.get("products", []), indent=2
+#             )
+#             prompt += f"Product pricing information:\n{products_info}\n\n"
+
+#         prompt += "Please provide a helpful response to this billing or order question."
+
+#         # Generate response
+#         response = self.llm_utils.generate_response(prompt, self.system_prompt)
+#         logger.info(f"Billing Agent response: {response}")
+#         logger.info("********************************************")
+#         return response
+
+# # Account Management Agent
+# class AccountManagementAgent(BaseAgent):
+#     def __init__(self, llm_utils: LLMUtils):
+#         super().__init__(llm_utils)
+#         self.system_prompt = """
+#         You are an Account Management Agent for TechSolutions. Your task is to provide precise information and instructions for managing a customer's account, including user management and subscription details. Your response must match the provided examples.
+
+#         Example for a query about adding users to an account:
+#         I'd be happy to help you add users to your account.
+#         Your current subscription plan is: {plan}.
+#         Current number of user accounts: {current_user_count}.
+#         Available user slots: {available_slots}.
+
+#         To add users, please follow these steps:
+#         1. Log in to the customer portal at portal.techsolutions.example.com
+#         2. Navigate to Admin > User Management > Add User
+#         3. Enter the email addresses for the new users
+#         4. Select the appropriate role for each new user (Admin, Operator, Auditor, or Viewer)
+#         5. Customize permissions if needed
+#         6. Click 'Send Invitation'
+
+#         If you need to add users beyond your plan's limit, you may consider purchasing additional licenses.
+
+#         You must fill in the placeholders with accurate information from the provided context.
+#         """
+    
+#     async def _get_account_info(self, account_id: str) -> Dict[str, Any]:
+#         """Retrieve account details using the Account API."""
+#         try:
+#             url = f"http://localhost:8000/api/accounts/{account_id}"
+#             response = await asyncio.to_thread(requests.get, url)
+#             response.raise_for_status()
+#             logger.info(f"Account API response: {response}")
+#             logger.info(f"Account API response status: {response.status_code}")
+#             logger.info(f"Raw account API response text: {response.text}")
+#             logger.info("********************************************")
+#             return response.json()
+#         except requests.exceptions.HTTPError as e:
+#             if e.response.status_code == 404:
+#                 logger.warning(f"Account not found: {account_id}")
+#                 return {}
+#             else:
+#                 logger.error(f"Error retrieving account details: {e}")
+#                 return {}
+#         except Exception as e:
+#             logger.error(f"Error retrieving account details: {e}")
+#             return {}
+    
+#     async def process(
+#         self, query: str, conversation_history: List[Dict[str, Any]] = None
+#     ) -> str:
+#         """
+#         Process an account management query.
+#         For this scenario, we'll assume that the account id might be extracted from the query.
+#         If not, you could use a default value or query context.
+#         """
+#         import re
+
+#         # Extract an account id from the query (e.g., ACC-1111). This is just one approach.
+#         account_id = None
+#         account_match = re.search(r"ACC-\d+", query)
+#         if account_match:
+#             account_id = account_match.group(0)
+        
+#         # For testing purposes, if no account id is provided, use a dummy account id.
+#         if not account_id:
+#             account_id = "ACC-1111"
+        
+#         logger.info(f"Account ID extracted: {account_id}")
+        
+#         # Retrieve account details from the account API
+#         account_info = await self._get_account_info(account_id)
+#         logger.info(f"Retrieved account info: {account_info}")
+        
+#         # For this scenario we expect account_info to include subscription data.
+#         # You can then extract the subscription plan and calculate available user slots.
+#         subscription = account_info.get("subscription", {})
+#         plan = subscription.get("plan", "unknown")
+#         # Here you can define your logic. For example:
+#         if plan.lower() == "cm-pro":
+#             user_limit = 20
+#         elif plan.lower() == "cm-enterprise":
+#             user_limit = float("inf")  # unlimited
+#         else:
+#             user_limit = 5  # default for basic plans
+        
+#         # You might also keep track of the number of users on the account
+#         current_user_count = len(account_info.get("users", []))
+#         available_slots = "unlimited" if user_limit == float("inf") else max(0, user_limit - current_user_count)
+        
+#         # Construct a response message based on this information
+#         response_message = (
+#             f"I'd be happy to help you add users to your account.\n\n"
+#             f"Your current subscription plan is: {plan}.\n"
+#             f"Current number of user accounts: {current_user_count}.\n"
+#             f"Available user slots: {available_slots}.\n\n"
+#             f"To add users, please follow these steps:\n"
+#             f"1. Log in to the customer portal at portal.techsolutions.example.com\n"
+#             f"2. Navigate to Admin > User Management > Add User\n"
+#             f"3. Enter the email addresses for the new users\n"
+#             f"4. Select the appropriate role for each new user (Admin, Operator, Auditor, or Viewer)\n"
+#             f"5. Customize permissions if needed\n"
+#             f"6. Click 'Send Invitation'\n\n"
+#             f"If you need to add users beyond your plan's limit, you may consider purchasing additional licenses."
+#         )
+        
+#         # Optionally, incorporate additional LLM instructions using your llm_utils if desired
+#         # For simplicity, we return the constructed message here.
+#         return response_message
+
+# # Orchestrator implementation
+# class AgentOrchestrator:
+#     def __init__(
+#         self,
+#         llm_utils: LLMUtils,
+#         knowledge_base: Dict[str, Any],
+#         vector_db: Dict[str, Collection],
+#     ):
+#         self.llm_utils = llm_utils
+#         self.knowledge_base = knowledge_base
+#         self.vector_db = vector_db
+#         self.conversations = {}
+
+#         # Initialize agents
+#         self.router_agent = RouterAgent(llm_utils)
+#         self.product_agent = ProductSpecialistAgent(
+#             llm_utils,
+#             knowledge_base["product_catalog"],
+#             knowledge_base["faqs"],
+#             vector_db["products"],
+#         )
+#         self.technical_agent = TechnicalSupportAgent(
+#             llm_utils, knowledge_base["tech_docs"], vector_db["technical"]
+#         )
+#         self.billing_agent = OrderBillingAgent(
+#             llm_utils, knowledge_base["product_catalog"]
+#         )
+#         self.account_agent = AccountManagementAgent(llm_utils)
+
+#         logger.info("Agent Orchestrator initialized with all agents")
+
+#     async def process_query(
+#         self, query: str, conversation_id: Optional[str] = None
+#     ) -> Dict[str, Any]:
+#         """Process a customer query through the appropriate agent"""
+#         # Initialize conversation if new
+#         if conversation_id not in self.conversations:
+#             self.conversations[conversation_id] = []
+
+#         # Get conversation history
+#         conversation_history = self.conversations.get(conversation_id, [])
+
+#         # Route the query using the router agent
+#         routing_result = self.router_agent.process(query, conversation_history)
+
+#         # Handle multi-part queries
+#         if routing_result.get("multi_part", False):
+#             responses = []
+#             for part in routing_result.get("parts", []):
+#                 part_query = part.get("query_part")
+#                 part_classification = part.get("classification")
+#                 part_response = await self._process_single_query(
+#                     part_query, part_classification, conversation_history
+#                 )
+#                 responses.append(f"{part_response}")
+
+#             final_response = "\n\n".join(responses)
+#             agent_type = "multiple"
+#         else:
+#             # Handle single-part query
+#             classification = routing_result.get("classification", "General")
+
+#             # Check if clarification is needed
+#             if routing_result.get("requires_clarification", False):
+#                 final_response = routing_result.get(
+#                     "clarification_question",
+#                     "Could you please provide more details about your question?",
+#                 )
+#                 agent_type = "router"
+#             else:
+#                 final_response = await self._process_single_query(
+#                     query, classification, conversation_history
+#                 )
+#                 agent_type = classification.lower()
+
+#         # Update conversation history
+#         self.conversations[conversation_id].append(
+#             {"query": query, "response": final_response, "agent": agent_type}
+#         )
+
+#         return {
+#             "response": final_response,
+#             "agent": agent_type,
+#             "conversation_id": conversation_id or "new_conversation",
+#         }
+
+#     async def _process_single_query(
+#         self,
+#         query: str,
+#         classification: str,
+#         conversation_history: List[Dict[str, Any]],
+#     ) -> str:
+#         """Process a single-part query based on its classification"""
+#         if classification == "Product":
+#             logger.info(f"Processing product query, query: {query}")
+#             logger.info("********************************************")
+#             return await self.product_agent.process(query, conversation_history)
+#         elif classification == "Technical":
+#             logger.info(f"Processing technical query, query: {query}")
+#             logger.info("********************************************")
+#             return await self.technical_agent.process(query, conversation_history)
+#         elif classification == "Billing":
+#             logger.info(f"Processing billing query, query: {query}")
+#             logger.info("********************************************")
+#             return await self.billing_agent.process(query, conversation_history)
+#         elif classification == "Account":
+#             # Check if Account Management Agent is available (for mid-session challenge)
+#             if self.account_agent:
+#                 logger.info(f"Processing account query, query: {query}")
+#                 logger.info("********************************************")
+#                 return await self.account_agent.process(query, conversation_history)
+#             else:
+#                 # Fallback to billing agent if account agent not yet implemented
+#                 fallback_response = self.billing_agent.process(
+#                     query, conversation_history
+#                 )
+#                 return fallback_response
+#         else:
+#             # Default to a general response
+#             general_prompt = f"""
+#             Customer query: {query}
+            
+#             Please provide a helpful and friendly general response to this query.
+#             """
+#             general_system_prompt = """
+#             You are a Customer Support Agent for TechSolutions.
+#             Provide helpful, friendly, and concise responses to general customer inquiries.
+#             If the query should be handled by a specialist agent, indicate which type of specialist would be appropriate.
+#             """
+#             return self.llm_utils.generate_response(
+#                 general_prompt, general_system_prompt
+#             )
+
+#     # This method will be implemented during the mid-session challenge
+#     def add_account_management_agent(self):
+#         """Add the Account Management Agent (for mid-session challenge)"""
+#         pass
+
+
+# ---------------------------------------------------------------------------------------------------------------------------
+
 import asyncio
 import json
 import logging
@@ -56,17 +834,17 @@ class BaseAgent:
         """Process a query and return a response"""
         raise NotImplementedError("Subclasses must implement this method")
 
+# Router Agent
 class RouterAgent(BaseAgent):
     def __init__(self, llm_utils: LLMUtils):
         super().__init__(llm_utils)
-        # The system prompt is still valuable for general classifications not covered by hardcoded rules
         self.system_prompt = """
         You are a highly-accurate query classifier. Your only task is to classify a customer's query and provide the output as a single JSON object.
 
         Strictly classify the query into one of these five categories: 'Product', 'Technical', 'Billing', 'Account', or 'General'.
 
         - A 'Product' query is about features, pricing, specifications, comparisons, or what a product does.
-        - A 'Technical' query is about errors, troubleshooting, bugs, or technical issues.
+        - A 'Technical' query is about errors, troubleshooting, bugs, or technical issues. A query containing keywords like 'error', 'fix', 'troubleshoot', or a specific error code like 'E5678' **must** be classified as Technical, and **must not** require clarification.
         - A 'Billing' query is about orders, invoices, payments, or subscriptions.
         - An 'Account' query is about user management, access, or account settings.
         - A 'General' query is too vague and requires more information.
@@ -81,17 +859,6 @@ class RouterAgent(BaseAgent):
             "clarification_question": ""
         }
 
-        Example for a multi-part query:
-        {
-            "multi_part": true,
-            "parts": [
-                {
-                    "query_part": "extracted part of the query",
-                    "classification": "Product"
-                }
-            ]
-        }
-
         Example for a vague query that needs clarification:
         {
             "classification": "General",
@@ -102,27 +869,20 @@ class RouterAgent(BaseAgent):
         """
 
     def process(self, query: str, conversation_history: List[Dict[str, Any]] = None) -> Dict[str, Any]:
-        # Normalize the query for keyword matching
+        # Rules-based pre-processing for critical classifications
         normalized_query = query.lower()
         
-        # --- Rules-based pre-processing for critical classifications ---
-        # This ensures specific queries are always routed correctly, bypassing LLM ambiguity.
-
-        # Technical queries (e.g., error codes, troubleshooting)
         technical_keywords = ["error", "fix", "troubleshoot", "e1234", "e5678"]
         if any(keyword in normalized_query for keyword in technical_keywords):
-            logger.info(f"Router Agent: Detected technical query via keywords: {query}")
             return {
                 "classification": "Technical",
                 "confidence": 0.99,
                 "requires_clarification": False,
                 "clarification_question": ""
             }
-            
-        # Billing/Order queries (e.g., order status, pricing, specific order IDs)
+        
         billing_keywords = ["order", "billing", "invoice", "price", "discount", "subscription", "cost"]
         if any(keyword in normalized_query for keyword in billing_keywords) or "ord-" in normalized_query:
-            logger.info(f"Router Agent: Detected billing query via keywords: {query}")
             return {
                 "classification": "Billing",
                 "confidence": 0.95,
@@ -130,21 +890,17 @@ class RouterAgent(BaseAgent):
                 "clarification_question": ""
             }
         
-        # Account queries (e.g., user management, account details, specific account IDs)
         account_keywords = ["account", "user", "add user", "licenses", "acc-"]
         if any(keyword in normalized_query for keyword in account_keywords):
-            logger.info(f"Router Agent: Detected account query via keywords: {query}")
             return {
                 "classification": "Account",
                 "confidence": 0.95,
                 "requires_clarification": False,
                 "clarification_question": ""
             }
-
-        # Product queries (e.g., features, comparisons, descriptions)
+            
         product_keywords = ["features", "compare", "product", "service", "plan", "what is"]
         if any(keyword in normalized_query for keyword in product_keywords) and "error" not in normalized_query and "ord-" not in normalized_query and "acc-" not in normalized_query:
-            logger.info(f"Router Agent: Detected product query via keywords: {query}")
             return {
                 "classification": "Product",
                 "confidence": 0.9,
@@ -152,68 +908,36 @@ class RouterAgent(BaseAgent):
                 "clarification_question": ""
             }
 
-        # --- Fallback to LLM classification if no specific rule matches ---
+        # Fallback to LLM classification
         prompt = f"CLASSIFY QUERY: {query}\n\nOUTPUT JSON:"
         response = self.llm_utils.generate_response(prompt, self.system_prompt)
-        logger.info(f"Router Agent LLM response: {response}")
-        logger.info("********************************************")
-        
-        # Clean the response before parsing
         cleaned_response = self._clean_json_response(response)
-        logger.info(f"Cleaned response: {cleaned_response}")
-        logger.info("********************************************")
         
         try:
             result = json.loads(cleaned_response)
-            logger.info(f"JSON parsed successfully: {result}")
-            logger.info("********************************************")
             return self._validate_response_structure(result)
         except json.JSONDecodeError as e:
-            logger.error(f"JSON parsing failed. Raw response: {response}")
-            # Use a safe fallback if LLM response is unparseable
             return self._safe_fallback_response(query, e)
 
     def _clean_json_response(self, response: str) -> str:
-        """Remove non-JSON content from the response"""
-        # Remove markdown code blocks (e.g., ```json ... ```)
         response = response.replace('```json', '').replace('```', '')
-        # Attempt to extract the first JSON object
         start = response.find('{')
         end = response.rfind('}') + 1
         return response[start:end] if start != -1 and end != 0 else response
 
     def _validate_response_structure(self, result: Dict) -> Dict:
-        """Ensure response has required fields and correct structure"""
         required_single = ["classification", "confidence", "requires_clarification"]
         required_multi = ["multi_part", "parts"]
         
         if "multi_part" in result:
             if not all(k in result for k in required_multi):
-                raise ValueError("Invalid multi-part structure: missing keys")
-            if not isinstance(result.get("parts"), list):
-                raise ValueError("Invalid multi-part structure: 'parts' is not a list")
-            for part in result.get("parts", []):
-                if not isinstance(part, dict) or "query_part" not in part or "classification" not in part:
-                    raise ValueError("Invalid part structure within multi-part query")
+                raise ValueError("Invalid multi-part structure")
         else:
             if not all(k in result for k in required_single):
-                raise ValueError("Missing required fields for single query classification")
-            # Ensure classification is one of the expected values
-            valid_classifications = ["Product", "Technical", "Billing", "Account", "General"]
-            if result.get("classification") not in valid_classifications:
-                raise ValueError(f"Invalid classification value: {result.get('classification')}")
-            if not isinstance(result.get("confidence"), (int, float)) or not (0 <= result.get("confidence") <= 1):
-                raise ValueError("Confidence must be a float between 0 and 1.")
-            if not isinstance(result.get("requires_clarification"), bool):
-                raise ValueError("Requires_clarification must be a boolean.")
-
-        logger.info(f"Valid response structure: {result}")
-        logger.info("********************************************")       
+                raise ValueError("Missing required fields")
         return result
 
     def _safe_fallback_response(self, query: str, error: Exception) -> Dict:
-        """Create a safe fallback response when parsing or validation fails"""
-        logger.warning(f"Using fallback classification for query: {query}. Error: {error}")
         return {
             "classification": "General",
             "confidence": 0.5,
@@ -222,9 +946,9 @@ class RouterAgent(BaseAgent):
             "parse_error": str(error)
         }
 
-
 # Product Specialist Agent
 class ProductSpecialistAgent(BaseAgent):
+    # ... (rest of the class)
     def __init__(
         self,
         llm_utils: LLMUtils,
@@ -256,140 +980,82 @@ class ProductSpecialistAgent(BaseAgent):
         """
 
     def _retrieve_relevant_information(self, query: str) -> str:
-        """Retrieve relevant product information from the knowledge base"""
         try:
-            # Query the vector database for relevant information
             results = self.vector_db.query(query_texts=[query], n_results=3)
-
-            # Extract and return the relevant information
             relevant_info = "\n\n".join(results.get("documents", [[]])[0])
             return relevant_info
         except Exception as e:
-            logger.error(f"Error retrieving information from vector database: {e}")
             return ""
 
-    async def process(
-        self, query: str, conversation_history: List[Dict[str, Any]] = None
-    ) -> str:
-        # Retrieve relevant information from the knowledge base using RAG
+    async def process(self, query: str, conversation_history: List[Dict[str, Any]] = None) -> Tuple[str, Dict[str, Any]]:
         relevant_info = self._retrieve_relevant_information(query)
-
-        logger.info(f"Relevant information: {relevant_info}")
-        logger.info("********************************************")
-
-        # Construct the prompt for the LLM
-        prompt = f"""
-        Customer query: {query}
+        prompt = f"""Customer query: {query}\n\nRelevant information:\n{relevant_info}\n\nPlease provide a helpful response based on this information."""
+        response_text = self.llm_utils.generate_response(prompt, self.system_prompt)
         
-        Relevant information:
-        {relevant_info}
-        
-        Please provide a helpful response based on this information.
-        """
-
-        # Generate response (this call remains synchronous)
-        response = self.llm_utils.generate_response(prompt, self.system_prompt)
-        return response
+        verification_data = {
+            "retrieved_info": relevant_info,
+            "agent_prompt": prompt,
+        }
+        return response_text, verification_data
 
 # Technical Support Agent
 class TechnicalSupportAgent(BaseAgent):
+    # ... (rest of the class)
     def __init__(self, llm_utils: LLMUtils, tech_docs: str, vector_db: Collection):
         super().__init__(llm_utils)
         self.tech_docs = tech_docs
         self.vector_db = vector_db
         self.system_prompt = """
-                You are a Technical Support Agent for TechSolutions. Your responses must follow this structure exactly, using information from the provided diagnostic results and knowledge base.
+        You are a Technical Support Agent for TechSolutions. Your responses must follow this structure, using information from the provided diagnostic results and knowledge base.
 
-        Start your response with: "I understand you're encountering error {error_code} when trying to deploy a container. This error indicates a '{issue_name}' issue..."
-
-        Then, provide a numbered list of troubleshooting steps. Each step must have a bolded heading followed by a bullet-pointed list of sub-actions.
-        Example:
-        1. **Check image integrity**:
-        - Try to re-pull the image from your registry
-        - Verify the image digest matches the expected value
-
-        After the steps, if the context includes information about temporary exceptions, provide a separate paragraph explaining how to create one.
-
-        End your response with: "Would you like me to guide you through creating this exception, or do you need help with any specific part of the troubleshooting process?"
+        Start with: "I understand you're encountering error {error_code} when trying to deploy a container. This error indicates a '{issue_name}' issue..."
+        
+        Then, provide a numbered list of steps with a clear, bolded title for each step.
+        Each step should have a bullet-pointed list of sub-actions.
+        
+        If applicable, add an additional paragraph for a temporary solution, such as creating an exception.
+        
+        End your response with a question about whether the customer needs more help.
         """
 
     def _retrieve_troubleshooting_info(self, query: str) -> str:
-        """Retrieve relevant troubleshooting information"""
         try:
-            # Query the vector database for relevant information
             results = self.vector_db.query(query_texts=[query], n_results=3)
-
-            logger.info(f"Retrieved troubleshooting information: {results}")
-            logger.info("********************************************")
-
-            # Extract and return the relevant information
             relevant_info = "\n\n".join(results.get("documents", [[]])[0])
             return relevant_info
         except Exception as e:
-            logger.error(f"Error retrieving troubleshooting information: {e}")
             return ""
 
     async def _call_diagnostic_api(self, issue_description: str) -> Dict[str, Any]:
-        """Call the diagnostic API for automated issue identification asynchronously"""
         try:
-            # Run the blocking requests.post in a thread so it doesn't block the event loop
-            response = await asyncio.to_thread(
-                requests.post,
-                "http://localhost:8000/api/diagnose",
-                json={"description": issue_description},
-            )
+            response = await asyncio.to_thread(requests.post, "http://localhost:8000/api/diagnose", json={"description": issue_description})
             response.raise_for_status()
-            logger.info(f"Diagnostic API response: {response}")
-            logger.info("********************************************")
-            result = response.json()
-            logger.info(f"Diagnostic API returned JSON: {result}")
-            return result
+            return response.json()
         except Exception as e:
-            logger.error(f"Error calling diagnostic API: {e}")
             return {}
 
-    async def process(
-        self, query: str, conversation_history: List[Dict[str, Any]] = None
-    ) -> str:
-        # Retrieve relevant troubleshooting information (synchronously)
+    async def process(self, query: str, conversation_history: List[Dict[str, Any]] = None) -> Tuple[str, Dict[str, Any]]:
         relevant_info = self._retrieve_troubleshooting_info(query)
-        logger.info(f"Relevant troubleshooting information: {relevant_info}")
-        logger.info("********************************************")
-
-        # Get diagnostic suggestions asynchronously
         diagnostic_info = await self._call_diagnostic_api(query)
-        logger.info(f"Diagnostic API response from process function: {diagnostic_info}")
-        logger.info("********************************************")
         diagnostic_text = ""
         if diagnostic_info:
             solutions = diagnostic_info.get("solutions", [])
             solutions_text = "\n".join([f"- {solution}" for solution in solutions])
-            diagnostic_text = f"""
-            Diagnostic results:
-            Issue: {diagnostic_info.get('name', 'Unknown issue')}
-            Suggested solutions:
-            {solutions_text}
-            Documentation: {diagnostic_info.get('documentation_link', '')}
-            """
+            diagnostic_text = f"""\nDiagnostic results:\nIssue: {diagnostic_info.get('name', 'Unknown issue')}\nSuggested solutions:\n{solutions_text}\nDocumentation: {diagnostic_info.get('documentation_link', '')}\n"""
 
-        # Construct the prompt for the LLM
-        prompt = f"""
-        Customer query: {query}
+        prompt = f"""Customer query: {query}\n\nRelevant troubleshooting information:\n{relevant_info}\n\n{diagnostic_text}\n\nPlease provide a helpful response to resolve this technical issue."""
+        response_text = self.llm_utils.generate_response(prompt, self.system_prompt)
         
-        Relevant troubleshooting information:
-        {relevant_info}
-        
-        {diagnostic_text}
-        
-        Please provide a helpful response to resolve this technical issue.
-        """
-
-        # Generate response using the LLM (this call remains synchronous)
-        response = self.llm_utils.generate_response(prompt, self.system_prompt)
-        return response
+        verification_data = {
+            "retrieved_info": relevant_info,
+            "diagnostic_api_response": diagnostic_info,
+            "agent_prompt": prompt,
+        }
+        return response_text, verification_data
 
 # Order/Billing Agent
 class OrderBillingAgent(BaseAgent):
+    # ... (rest of the class)
     def __init__(self, llm_utils: LLMUtils, product_catalog: Dict[str, Any]):
         super().__init__(llm_utils)
         self.product_catalog = product_catalog
@@ -415,115 +1081,45 @@ class OrderBillingAgent(BaseAgent):
         """
 
     async def _get_order_details(self, order_id: str) -> Dict[str, Any]:
-        """Retrieve order details from the Order API"""
         try:
-            response = await asyncio.to_thread(
-            requests.get, f"http://localhost:8000/api/orders/{order_id}"
-        )
+            response = await asyncio.to_thread(requests.get, f"http://localhost:8000/api/orders/{order_id}")
             response.raise_for_status()
-            logger.info(f"Order details from the order API: {response}")
-            logger.info("********************************************")
             return response.json()
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 404:
-                logger.warning(f"Order not found: {order_id}")
-                return {}
-            else:
-                logger.error(f"Error retrieving order details: {e}")
-                return {}
         except Exception as e:
-            logger.error(f"Error retrieving order details: {e}")
             return {}
 
     async def _get_account_details(self, account_id: str) -> Dict[str, Any]:
-        """Retrieve account details from the Account API"""
         try:
-            response = await asyncio.to_thread(
-            requests.get, f"http://localhost:8000/api/accounts/{account_id}"
-        )
-            logger.info(f"Account details from the account API: {response}")
-            logger.info("********************************************")
+            response = await asyncio.to_thread(requests.get, f"http://localhost:8000/api/accounts/{account_id}")
             response.raise_for_status()
             return response.json()
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 404:
-                logger.warning(f"Account not found: {account_id}")
-                return {}
-            else:
-                logger.error(f"Error retrieving account details: {e}")
-                return {}
         except Exception as e:
-            logger.error(f"Error retrieving account details: {e}")
             return {}
 
-    async def process(
-        self, query: str, conversation_history: List[Dict[str, Any]] = None
-    ) -> str:
-        # Extract order ID if present in the query
+    async def process(self, query: str, conversation_history: List[Dict[str, Any]] = None) -> Tuple[str, Dict[str, Any]]:
         order_id = None
         import re
-
         order_match = re.search(r"ORD-\d+", query)
         if order_match:
             order_id = order_match.group(0)
-        
-        logger.info(f"Order ID from the process function: {order_id}")
-        logger.info("********************************************")
 
-        # Extract account ID if present in the query
         account_id = None
         account_match = re.search(r"ACC-\d+", query)
         if account_match:
             account_id = account_match.group(0)
 
-        logger.info(f"Account ID from the process function: {account_id}")
-        logger.info("********************************************")
+        order_details = await self._get_order_details(order_id) if order_id else {}
+        account_details = await self._get_account_details(account_id) if account_id else {}
 
-        # Retrieve order details if order ID is available
-        order_details = {}
-        if order_id:
-            order_details = await self._get_order_details(order_id)
-
-        logger.info(f"Order details from the process function: {order_details}")
-        logger.info("********************************************")
-
-        # Retrieve account details if account ID is available
-        account_details = {}
-        if account_id:
-            account_details = await self._get_account_details(account_id)
-
-        logger.info(f"Account details from the process function: {account_details}")
-        logger.info("********************************************")
-
-        # Construct the prompt with available information
-        prompt = f"Customer query: {query}\n\n"
-
-        if order_details:
-            prompt += f"Order information:\n{json.dumps(order_details, indent=2)}\n\n"
-
-        if account_details:
-            prompt += (
-                f"Account information:\n{json.dumps(account_details, indent=2)}\n\n"
-            )
-
-        # Add product pricing information if relevant
-        if (
-            "pricing" in query.lower()
-            or "cost" in query.lower()
-            or "price" in query.lower()
-        ):
-            products_info = json.dumps(
-                self.product_catalog.get("products", []), indent=2
-            )
-            prompt += f"Product pricing information:\n{products_info}\n\n"
-
-        prompt += "Please provide a helpful response to this billing or order question."
-
-        # Generate response
-        response = self.llm_utils.generate_response(prompt, self.system_prompt)
-        logger.info(f"Billing Agent response: {response}")
-        logger.info("********************************************")
-        return response
+        prompt = f"Customer query: {query}\n\nOrder information:\n{json.dumps(order_details, indent=2)}\n\nAccount information:\n{json.dumps(account_details, indent=2)}\n\nPlease provide a helpful response to this billing or order question."
+        response_text = self.llm_utils.generate_response(prompt, self.system_prompt)
+        
+        verification_data = {
+            "order_api_response": order_details,
+            "account_api_response": account_details,
+            "agent_prompt": prompt,
+        }
+        return response_text, verification_data
 
 # Account Management Agent
 class AccountManagementAgent(BaseAgent):
@@ -552,71 +1148,39 @@ class AccountManagementAgent(BaseAgent):
         """
     
     async def _get_account_info(self, account_id: str) -> Dict[str, Any]:
-        """Retrieve account details using the Account API."""
         try:
             url = f"http://localhost:8000/api/accounts/{account_id}"
             response = await asyncio.to_thread(requests.get, url)
             response.raise_for_status()
-            logger.info(f"Account API response: {response}")
-            logger.info(f"Account API response status: {response.status_code}")
-            logger.info(f"Raw account API response text: {response.text}")
-            logger.info("********************************************")
             return response.json()
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 404:
-                logger.warning(f"Account not found: {account_id}")
-                return {}
-            else:
-                logger.error(f"Error retrieving account details: {e}")
-                return {}
         except Exception as e:
-            logger.error(f"Error retrieving account details: {e}")
             return {}
     
-    async def process(
-        self, query: str, conversation_history: List[Dict[str, Any]] = None
-    ) -> str:
-        """
-        Process an account management query.
-        For this scenario, we'll assume that the account id might be extracted from the query.
-        If not, you could use a default value or query context.
-        """
+    async def process(self, query: str, conversation_history: List[Dict[str, Any]] = None) -> Tuple[str, Dict[str, Any]]:
         import re
-
-        # Extract an account id from the query (e.g., ACC-1111). This is just one approach.
         account_id = None
         account_match = re.search(r"ACC-\d+", query)
         if account_match:
             account_id = account_match.group(0)
         
-        # For testing purposes, if no account id is provided, use a dummy account id.
         if not account_id:
             account_id = "ACC-1111"
         
-        logger.info(f"Account ID extracted: {account_id}")
-        
-        # Retrieve account details from the account API
         account_info = await self._get_account_info(account_id)
-        logger.info(f"Retrieved account info: {account_info}")
         
-        # For this scenario we expect account_info to include subscription data.
-        # You can then extract the subscription plan and calculate available user slots.
         subscription = account_info.get("subscription", {})
         plan = subscription.get("plan", "unknown")
-        # Here you can define your logic. For example:
         if plan.lower() == "cm-pro":
             user_limit = 20
         elif plan.lower() == "cm-enterprise":
-            user_limit = float("inf")  # unlimited
+            user_limit = float("inf")
         else:
-            user_limit = 5  # default for basic plans
+            user_limit = 5
         
-        # You might also keep track of the number of users on the account
         current_user_count = len(account_info.get("users", []))
         available_slots = "unlimited" if user_limit == float("inf") else max(0, user_limit - current_user_count)
         
-        # Construct a response message based on this information
-        response_message = (
+        response_text = (
             f"I'd be happy to help you add users to your account.\n\n"
             f"Your current subscription plan is: {plan}.\n"
             f"Current number of user accounts: {current_user_count}.\n"
@@ -630,95 +1194,72 @@ class AccountManagementAgent(BaseAgent):
             f"6. Click 'Send Invitation'\n\n"
             f"If you need to add users beyond your plan's limit, you may consider purchasing additional licenses."
         )
-        
-        # Optionally, incorporate additional LLM instructions using your llm_utils if desired
-        # For simplicity, we return the constructed message here.
-        return response_message
+
+        verification_data = {
+            "account_api_response": account_info,
+            "extracted_info": {
+                "plan": plan,
+                "current_user_count": current_user_count,
+                "available_slots": available_slots,
+            }
+        }
+        return response_text, verification_data
 
 # Orchestrator implementation
 class AgentOrchestrator:
-    def __init__(
-        self,
-        llm_utils: LLMUtils,
-        knowledge_base: Dict[str, Any],
-        vector_db: Dict[str, Collection],
-    ):
+    def __init__(self, llm_utils: LLMUtils, knowledge_base: Dict[str, Any], vector_db: Dict[str, Collection]):
         self.llm_utils = llm_utils
         self.knowledge_base = knowledge_base
         self.vector_db = vector_db
         self.conversations = {}
 
-        # Initialize agents
         self.router_agent = RouterAgent(llm_utils)
-        self.product_agent = ProductSpecialistAgent(
-            llm_utils,
-            knowledge_base["product_catalog"],
-            knowledge_base["faqs"],
-            vector_db["products"],
-        )
-        self.technical_agent = TechnicalSupportAgent(
-            llm_utils, knowledge_base["tech_docs"], vector_db["technical"]
-        )
-        self.billing_agent = OrderBillingAgent(
-            llm_utils, knowledge_base["product_catalog"]
-        )
+        self.product_agent = ProductSpecialistAgent(llm_utils, knowledge_base["product_catalog"], knowledge_base["faqs"], vector_db["products"])
+        self.technical_agent = TechnicalSupportAgent(llm_utils, knowledge_base["tech_docs"], vector_db["technical"])
+        self.billing_agent = OrderBillingAgent(llm_utils, knowledge_base["product_catalog"])
         self.account_agent = AccountManagementAgent(llm_utils)
 
         logger.info("Agent Orchestrator initialized with all agents")
 
-    async def process_query(
-        self, query: str, conversation_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Process a customer query through the appropriate agent"""
-        # Initialize conversation if new
+    async def process_query(self, query: str, conversation_id: Optional[str] = None) -> Dict[str, Any]:
         if conversation_id not in self.conversations:
             self.conversations[conversation_id] = []
 
-        # Get conversation history
         conversation_history = self.conversations.get(conversation_id, [])
-
-        # Route the query using the router agent
         routing_result = self.router_agent.process(query, conversation_history)
 
-        # Handle multi-part queries
+        final_response, verification_info = "", {}
+        agent_type = ""
+        
         if routing_result.get("multi_part", False):
             responses = []
-            for part in routing_result.get("parts", []):
+            all_verification_info = {}
+            for i, part in enumerate(routing_result.get("parts", [])):
                 part_query = part.get("query_part")
                 part_classification = part.get("classification")
-                part_response = await self._process_single_query(
-                    part_query, part_classification, conversation_history
-                )
-                responses.append(f"{part_response}")
-
+                part_response, part_verification = await self._process_single_query(part_query, part_classification, conversation_history)
+                responses.append(part_response)
+                all_verification_info[f"part_{i}"] = part_verification
             final_response = "\n\n".join(responses)
             agent_type = "multiple"
+            verification_info = all_verification_info
         else:
-            # Handle single-part query
             classification = routing_result.get("classification", "General")
-
-            # Check if clarification is needed
             if routing_result.get("requires_clarification", False):
-                final_response = routing_result.get(
-                    "clarification_question",
-                    "Could you please provide more details about your question?",
-                )
+                final_response = routing_result.get("clarification_question", "Could you please provide more details about your question?")
                 agent_type = "router"
+                verification_info = {"routing_result": routing_result}
             else:
-                final_response = await self._process_single_query(
-                    query, classification, conversation_history
-                )
+                final_response, verification_info = await self._process_single_query(query, classification, conversation_history)
                 agent_type = classification.lower()
 
-        # Update conversation history
-        self.conversations[conversation_id].append(
-            {"query": query, "response": final_response, "agent": agent_type}
-        )
+        self.conversations[conversation_id].append({"query": query, "response": final_response, "agent": agent_type})
 
         return {
             "response": final_response,
             "agent": agent_type,
             "conversation_id": conversation_id or "new_conversation",
+            "verification_info": verification_info,
         }
 
     async def _process_single_query(
@@ -726,49 +1267,26 @@ class AgentOrchestrator:
         query: str,
         classification: str,
         conversation_history: List[Dict[str, Any]],
-    ) -> str:
-        """Process a single-part query based on its classification"""
-        if classification == "Product":
-            logger.info(f"Processing product query, query: {query}")
-            logger.info("********************************************")
-            return await self.product_agent.process(query, conversation_history)
-        elif classification == "Technical":
-            logger.info(f"Processing technical query, query: {query}")
-            logger.info("********************************************")
-            return await self.technical_agent.process(query, conversation_history)
-        elif classification == "Billing":
-            logger.info(f"Processing billing query, query: {query}")
-            logger.info("********************************************")
-            return await self.billing_agent.process(query, conversation_history)
-        elif classification == "Account":
-            # Check if Account Management Agent is available (for mid-session challenge)
-            if self.account_agent:
-                logger.info(f"Processing account query, query: {query}")
-                logger.info("********************************************")
-                return await self.account_agent.process(query, conversation_history)
-            else:
-                # Fallback to billing agent if account agent not yet implemented
-                fallback_response = self.billing_agent.process(
-                    query, conversation_history
-                )
-                return fallback_response
-        else:
-            # Default to a general response
-            general_prompt = f"""
-            Customer query: {query}
-            
-            Please provide a helpful and friendly general response to this query.
-            """
-            general_system_prompt = """
-            You are a Customer Support Agent for TechSolutions.
-            Provide helpful, friendly, and concise responses to general customer inquiries.
-            If the query should be handled by a specialist agent, indicate which type of specialist would be appropriate.
-            """
-            return self.llm_utils.generate_response(
-                general_prompt, general_system_prompt
-            )
+    ) -> Tuple[str, Dict[str, Any]]:
+        verification_info = {"classification": classification}
+        response_text = ""
 
-    # This method will be implemented during the mid-session challenge
+        if classification == "Product":
+            response_text, agent_verification = await self.product_agent.process(query, conversation_history)
+        elif classification == "Technical":
+            response_text, agent_verification = await self.technical_agent.process(query, conversation_history)
+        elif classification == "Billing":
+            response_text, agent_verification = await self.billing_agent.process(query, conversation_history)
+        elif classification == "Account":
+            response_text, agent_verification = await self.account_agent.process(query, conversation_history)
+        else:
+            general_prompt = f"""Customer query: {query}\n\nPlease provide a helpful and friendly general response to this query."""
+            general_system_prompt = """You are a Customer Support Agent for TechSolutions. Provide helpful, friendly, and concise responses to general customer inquiries. If the query should be handled by a specialist agent, indicate which type of specialist would be appropriate."""
+            response_text = self.llm_utils.generate_response(general_prompt, general_system_prompt)
+            agent_verification = {}
+        
+        verification_info.update(agent_verification)
+        return response_text, verification_info
+
     def add_account_management_agent(self):
-        """Add the Account Management Agent (for mid-session challenge)"""
         pass
